@@ -495,7 +495,7 @@ class MainActivity : ComponentActivity() {
                                 statusText.text = if (faceStore.isEmpty()) {
                                     "May tao pero wala pang naka-enroll na mukha"
                                 } else {
-                                    "Hindi kilala"
+                                    "May Tao"
                                 }
                                 lastUnknownFaceEmbedding = embedding
                                 canEnroll = true
