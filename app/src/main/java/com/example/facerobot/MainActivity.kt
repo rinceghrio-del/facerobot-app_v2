@@ -749,8 +749,8 @@ class MainActivity : ComponentActivity() {
         // Mirrored ang front camera input:
         // Kapag ang mukha ay nasa kaliwa sa pixel coordinates (faceCenterX < leftBoundary),
         // kailangang pumaling ng robot sa KANAN (RIGHT) para pumunta sa gitna ang mukha.
-        faceCenterX < leftBoundary -> "LEFT"
-        faceCenterX > rightBoundary -> "RIGHT"
+        faceCenterX < leftBoundary -> "RIGHT"
+        faceCenterX > rightBoundary -> "LEFT"
         else -> "STOP" // Kapag pasok na sa deadzone, hihinto agad!
     }
 }
