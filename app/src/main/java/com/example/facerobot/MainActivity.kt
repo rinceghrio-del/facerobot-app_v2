@@ -516,13 +516,16 @@ class MainActivity : ComponentActivity() {
         "Hi %s, kumusta ka?",
         "Ay, si %s! Kumusta?",
         "Magandang araw, %s!"
+        "Gusto mo bang makipag laro sakin %s!",
     )
 
     private val unknownGreetings = listOf(
-        "Kumusta, hindi pa kita kilala.",
-        "Hi stranger! Hindi pa tayo nagkakakilala.",
-        "Kumusta! Sino ka nga pala?",
-        "Hello! Pwede mo ba akong pa-enroll?"
+        "Kumusta, ano ginagawa mo ngayon.",
+        "Hi kaibigan na tao! Gusto mo bang makipag laro sa akin.",
+        "Kumusta! Saan pala kayo papunta?",
+        "Hello! Pwede mo ba akong Kausapin?",
+        "Hi! kausapin mo ako",
+        "Ngayon ka lan ba naka kita ng laruan na kagaya ko",
     )
 
     private fun greetIfNeeded(name: String) {
