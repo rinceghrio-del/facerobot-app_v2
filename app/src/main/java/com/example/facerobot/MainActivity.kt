@@ -515,7 +515,7 @@ class MainActivity : ComponentActivity() {
         "Kumusta, %s!",
         "Hi %s, kumusta ka?",
         "Ay, si %s! Kumusta?",
-        "Magandang araw, %s!"
+        "Magandang araw, %s!",
         "Gusto mo bang makipag laro sakin %s!",
     )
 
