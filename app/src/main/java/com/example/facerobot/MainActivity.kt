@@ -79,7 +79,13 @@ class MainActivity : ComponentActivity() {
 
     private var appState = AppState.EYES
 
-    private val esp32BaseUrl = "http://10.175.14.169"
+    private val prefs by lazy { getSharedPreferences("facerobot_prefs", MODE_PRIVATE) }
+    private var esp32BaseUrl: String
+        get() = "http://" + prefs.getString("esp32_ip", "192.168.1.25")!!
+        set(value) {
+            val ipOnly = value.removePrefix("http://").removePrefix("https://").trim()
+            prefs.edit().putString("esp32_ip", ipOnly).apply()
+        }
 
     private var lastSendTime = 0L
     private val sendIntervalMs = 300L
@@ -269,6 +275,17 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(0xFF121212.toInt())
         }
 
+        val ipOption = Button(this).apply {
+            text = "📶  IP ng Robot (${esp32BaseUrl.removePrefix("http://")})"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(40, 36, 40, 36)
+            background = makeRippleRoundedDrawable(darkChip, darkChipPressed, 24f)
+            setOnClickListener { showIpSettingDialog() }
+        }
+
         val enrollOption = Button(this).apply {
             text = "✨  Mag-enroll ng bagong mukha"
             textSize = 14f
@@ -300,7 +317,15 @@ class MainActivity : ComponentActivity() {
         val spacer = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
+        val spacer2 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 24)
+        }
 
+        container.addView(
+            ipOption,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+        container.addView(spacer2)
         container.addView(
             enrollOption,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
@@ -778,6 +803,28 @@ class MainActivity : ComponentActivity() {
     }
 
     // ---------- Enroll UI ----------
+
+    private fun showIpSettingDialog() {
+        val input = EditText(this).apply {
+            hint = "hal. 192.168.1.25 o 192.168.43.100"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(esp32BaseUrl.removePrefix("http://"))
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("I-set ang IP Address ng Robot")
+            .setMessage("Tignan sa OLED screen ng robot o Serial Monitor ang kasalukuyang IP nito bago i-save.")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val newIp = input.text.toString().trim()
+                if (newIp.isNotEmpty()) {
+                    esp32BaseUrl = newIp
+                    statusText.text = "IP na-update: $newIp"
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
     private fun showEnrollDialog() {
         val embedding = lastUnknownFaceEmbedding
