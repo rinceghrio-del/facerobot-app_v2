@@ -1,7 +1,6 @@
 package com.example.facerobot
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -15,9 +14,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
@@ -50,12 +46,23 @@ import com.google.mlkit.vision.face.FaceDetection
 import com.google.mlkit.vision.face.FaceDetectorOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.util.concurrent.ExecutorService
+import org.json.JSONObject
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.RecognitionListener as VoskListener
+import org.vosk.android.SpeechService
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.Locale
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.zip.ZipInputStream
 
 /**
  * FaceRobot MainActivity - Face Centering / Tracking Only Mode
+ * Voice recognition: offline Vosk (Filipino) instead of Android's built-in SpeechRecognizer.
  */
 @androidx.camera.core.ExperimentalGetImage
 class MainActivity : ComponentActivity() {
@@ -111,10 +118,15 @@ class MainActivity : ComponentActivity() {
     private val greetingCooldownMs = 60_000L
     private var lastUnknownGreetTime = 0L
 
-    private var speechRecognizer: SpeechRecognizer? = null
-    private var isListening = false
+    // ---------- Vosk offline speech recognition ----------
+    private var voskModel: Model? = null
+    private var speechService: SpeechService? = null
+    private var voskReady = false
     private var isSpeaking = false
     private var currentRecognizedName: String? = null
+
+    private val voskModelUrl = "https://alphacephei.com/vosk/models/vosk-model-tl-ph-generic-0.6.zip"
+    private val voskModelDirName = "vosk-model-tl-ph-generic-0.6"
 
     private val faceDetectorOptions = FaceDetectorOptions.Builder()
         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -147,12 +159,12 @@ class MainActivity : ComponentActivity() {
                     override fun onStart(utteranceId: String?) {}
                     override fun onDone(utteranceId: String?) {
                         isSpeaking = false
-                        runOnUi { scheduleRestartListening() }
+                        runOnUi { speechService?.setPause(false) }
                     }
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         isSpeaking = false
-                        runOnUi { scheduleRestartListening() }
+                        runOnUi { speechService?.setPause(false) }
                     }
                 })
                 ttsReady = true
@@ -169,7 +181,7 @@ class MainActivity : ComponentActivity() {
 
         if (missingPermissions.isEmpty()) {
             startCamera()
-            setupSpeechRecognizer()
+            setupVosk()
         } else {
             statusText.text = "Naghahanap ng tao... (hinihintay permissions...)"
             ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), 100)
@@ -416,7 +428,7 @@ class MainActivity : ComponentActivity() {
             }
 
             if (grantedMap[Manifest.permission.RECORD_AUDIO] == PackageManager.PERMISSION_GRANTED) {
-                setupSpeechRecognizer()
+                setupVosk()
             }
         }
     }
@@ -575,110 +587,147 @@ class MainActivity : ComponentActivity() {
         speak(unknownGreetings.random())
     }
 
-    // ---------- Voice command ----------
+    // ---------- Vosk offline voice recognition ----------
 
-    private fun setupSpeechRecognizer() {
-        if (!SpeechRecognizer.isRecognitionAvailable(this)) return
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-            setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onError(error: Int) {
-                    isListening = false
-                    val errorName = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH -> "WALANG NARINIG NA SALITA"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "TAHIMIK LANG / WALANG NAGSALITA"
-                        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "HINDI SUPORTADO ANG FILIPINO SA PHONE MO"
-                        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "FILIPINO LANGUAGE PACK WALA / DI AVAILABLE"
-                        SpeechRecognizer.ERROR_AUDIO -> "AUDIO ERROR (mic)"
-                        SpeechRecognizer.ERROR_CLIENT -> "CLIENT ERROR"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "WALANG MIC PERMISSION"
-                        SpeechRecognizer.ERROR_NETWORK -> "NETWORK ERROR"
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "NETWORK TIMEOUT"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "BUSY PA YUNG RECOGNIZER"
-                        SpeechRecognizer.ERROR_SERVER -> "SERVER ERROR"
-                        else -> "ERROR CODE $error"
-                    }
-                    // Kung Filipino talaga ang hindi supported sa device, bumalik sa default
-                    // locale ng phone imbes na patuloy na mag-fail nang tahimik.
-                    if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-                        error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
-                    ) {
-                        usingFallbackLocale = true
-                    }
-                    statusText.text = "[MIC] Error: $errorName"
-                    scheduleRestartListening()
-                }
-                override fun onResults(results: Bundle?) {
-                    isListening = false
-                    val candidates = results
-                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.map { it.lowercase(Locale.getDefault()) }
-                        .orEmpty()
-                    statusText.text = if (candidates.isNotEmpty()) {
-                        "[MIC] Narinig: ${candidates.joinToString(" / ")}"
-                    } else {
-                        "[MIC] Walang na-detect na salita"
-                    }
-                    // Sinusubukan lahat ng alternative na resulta, hindi lang yung pinaka-una,
-                    // dahil minsan nasa 2nd o 3rd guess pa lang yung tamang tugma sa command.
-                    if (candidates.isNotEmpty()) handleVoiceCommand(candidates)
-                    scheduleRestartListening()
-                }
-                override fun onPartialResults(partialResults: Bundle?) {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
-        }
-        startListening()
-    }
-
-    // Dapat tugma ito sa locale na ginagamit ng TTS (Locale("fil", "PH")) - kung hindi,
-    // maling language model ang gagamitin sa pakikinig kahit Filipino ang sinasabi ng user.
-    private val recognitionLocale = Locale("fil", "PH")
-    // Kapag na-detect na hindi supported ang Filipino sa device, gagamitin na lang
-    // yung default locale ng phone (karaniwang mas malawak ang language support nito).
-    private var usingFallbackLocale = false
-
-    private fun startListening() {
-        if (isListening || isSpeaking) return
-        val recognizer = speechRecognizer ?: return
-        val languageTag = if (usingFallbackLocale) {
-            Locale.getDefault().toLanguageTag()
+    /**
+     * Sinisimulan ang setup ng Vosk. Kung wala pang na-download na Filipino model sa
+     * internal storage, dina-download muna ito (isang beses lang) bago i-load.
+     */
+    private fun setupVosk() {
+        val modelDir = voskModelDir()
+        if (modelDir.exists() && modelDir.list()?.isNotEmpty() == true) {
+            loadVoskModel(modelDir.absolutePath)
         } else {
-            recognitionLocale.toLanguageTag()
-        }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            // BCP-47 tag (may dash, e.g. "fil-PH") ang inaasahan dito, hindi yung underscore
-            // na output ng Locale.toString() - kaya toLanguageTag() ang ginagamit.
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        }
-        isListening = true
-        try {
-            recognizer.startListening(intent)
-        } catch (e: Exception) {
-            isListening = false
+            downloadAndExtractVoskModel()
         }
     }
 
-    private fun scheduleRestartListening() {
-        // Bagong SpeechRecognizer instance ang ginagawa sa bawat restart imbes na muling
-        // gamitin yung luma - kilalang Android bug kasi na paulit-ulit na CLIENT ERROR
-        // ang lumalabas kapag ganito ginawa nang sunod-sunod ang parehong instance.
-        rootLayout.postDelayed({
+    private fun voskModelDir(): File = File(filesDir, voskModelDirName)
+
+    private fun downloadAndExtractVoskModel() {
+        Thread {
             try {
-                speechRecognizer?.destroy()
+                runOnUi { statusText.text = "⬇️ Dina-download ang Filipino voice model (~320MB, isang beses lang ito)..." }
+
+                val request = Request.Builder().url(voskModelUrl).build()
+                val response = httpClient.newCall(request).execute()
+                if (!response.isSuccessful) throw java.io.IOException("HTTP ${response.code}")
+                val body = response.body ?: throw java.io.IOException("Walang response body")
+
+                val zipFile = File(cacheDir, "vosk_model.zip")
+                val totalBytes = body.contentLength()
+                var downloadedBytes = 0L
+                var lastUpdate = 0L
+
+                body.byteStream().use { input ->
+                    FileOutputStream(zipFile).use { output ->
+                        val buffer = ByteArray(8192)
+                        var bytesRead: Int
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+                            val now = System.currentTimeMillis()
+                            if (totalBytes > 0 && now - lastUpdate > 500) {
+                                lastUpdate = now
+                                val percent = (downloadedBytes * 100 / totalBytes).toInt()
+                                runOnUi { statusText.text = "⬇️ Dina-download ang voice model... $percent%" }
+                            }
+                        }
+                    }
+                }
+                response.close()
+
+                runOnUi { statusText.text = "📦 Ina-extract ang voice model..." }
+                extractZip(zipFile, filesDir)
+                zipFile.delete()
+
+                loadVoskModel(voskModelDir().absolutePath)
             } catch (e: Exception) {
-                // wala lang, tuloy pa rin tayo sa paggawa ng bago
+                e.printStackTrace()
+                runOnUi { statusText.text = "❌ Hindi na-download ang voice model: ${e.message}" }
             }
-            speechRecognizer = null
-            setupSpeechRecognizer()
-        }, 500)
+        }.start()
+    }
+
+    private fun extractZip(zipFile: File, targetDir: File) {
+        ZipInputStream(BufferedInputStream(FileInputStream(zipFile))).use { zis ->
+            var entry = zis.nextEntry
+            val buffer = ByteArray(8192)
+            while (entry != null) {
+                val outFile = File(targetDir, entry.name)
+                if (entry.isDirectory) {
+                    outFile.mkdirs()
+                } else {
+                    outFile.parentFile?.mkdirs()
+                    FileOutputStream(outFile).use { fos ->
+                        var len: Int
+                        while (zis.read(buffer).also { len = it } > 0) {
+                            fos.write(buffer, 0, len)
+                        }
+                    }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+        }
+    }
+
+    private fun loadVoskModel(modelPath: String) {
+        Thread {
+            try {
+                val model = Model(modelPath)
+                voskModel = model
+                runOnUi {
+                    voskReady = true
+                    statusText.text = "🎤 Handa na makinig (offline)"
+                    startVoskListening()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                runOnUi { statusText.text = "❌ Hindi na-load ang voice model: ${e.message}" }
+            }
+        }.start()
+    }
+
+    private fun startVoskListening() {
+        val model = voskModel ?: return
+        try {
+            val recognizer = Recognizer(model, 16000.0f)
+            val service = SpeechService(recognizer, 16000.0f)
+            speechService = service
+            service.startListening(voskListener)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            statusText.text = "❌ Mic error: ${e.message}"
+        }
+    }
+
+    private val voskListener = object : VoskListener {
+        override fun onPartialResult(hypothesis: String?) {
+            // Hindi ginagamit - hinihintay ang buong (final) resulta na lang sa onResult
+        }
+
+        override fun onResult(hypothesis: String?) {
+            val text = try {
+                JSONObject(hypothesis ?: "").optString("text", "").trim()
+            } catch (e: Exception) {
+                ""
+            }
+            if (text.isNotEmpty()) {
+                runOnUi {
+                    statusText.text = "[MIC] Narinig: $text"
+                    handleVoiceCommand(listOf(text))
+                }
+            }
+        }
+
+        override fun onFinalResult(hypothesis: String?) {}
+
+        override fun onError(exception: Exception?) {
+            exception?.printStackTrace()
+        }
+
+        override fun onTimeout() {}
     }
 
     private fun handleVoiceCommand(candidates: List<String>) {
@@ -733,8 +782,7 @@ class MainActivity : ComponentActivity() {
     private fun speak(phrase: String) {
         if (!ttsReady) return
         isSpeaking = true
-        speechRecognizer?.stopListening()
-        isListening = false
+        speechService?.setPause(true)
         tts?.speak(phrase, TextToSpeech.QUEUE_FLUSH, null, "utt_${System.currentTimeMillis()}")
     }
 
@@ -940,6 +988,7 @@ class MainActivity : ComponentActivity() {
         faceEmbedder.close()
         tts?.stop()
         tts?.shutdown()
-        speechRecognizer?.destroy()
+        speechService?.stop()
+        speechService?.shutdown()
     }
 }
