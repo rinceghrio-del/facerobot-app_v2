@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
 
     private var appState = AppState.EYES
 
-    private val esp32BaseUrl = "http://192.168.1.25"
+    private val esp32BaseUrl = "http://10.175.14.169"
 
     private var lastSendTime = 0L
     private val sendIntervalMs = 300L
