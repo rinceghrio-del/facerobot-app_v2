@@ -14,6 +14,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Bundle
+import android.os.Handler
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.text.InputType
@@ -55,6 +56,8 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -127,6 +130,11 @@ class MainActivity : ComponentActivity() {
 
     private val voskModelUrl = "https://alphacephei.com/vosk/models/vosk-model-tl-ph-generic-0.6.zip"
     private val voskModelDirName = "vosk-model-tl-ph-generic-0.6"
+
+    // ---------- Voice log (para ma-verify kung tama ba ang narinig ni Vosk) ----------
+    // (oras, narinig na text, resulta/aksyon)
+    private val voiceLog = mutableListOf<Triple<Long, String, String>>()
+    private val voiceLogMaxSize = 100
 
     private val faceDetectorOptions = FaceDetectorOptions.Builder()
         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -326,10 +334,24 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { showManageCommandsDialog() }
         }
 
+        val voiceLogOption = Button(this).apply {
+            text = "🗒️  Voice Log"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(40, 36, 40, 36)
+            background = makeRippleRoundedDrawable(darkChip, darkChipPressed, 24f)
+            setOnClickListener { showVoiceLogDialog() }
+        }
+
         val spacer = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
         val spacer2 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 24)
+        }
+        val spacer3 = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
 
@@ -345,6 +367,11 @@ class MainActivity : ComponentActivity() {
         container.addView(spacer)
         container.addView(
             commandsOption,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+        container.addView(spacer3)
+        container.addView(
+            voiceLogOption,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         )
 
@@ -731,7 +758,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleVoiceCommand(candidates: List<String>) {
-        // Sinusubukan ang bawat alternative na resulta ng recognizer hanggang may tumama.
+        val heardText = candidates.firstOrNull() ?: return
+        val resultLabel = processVoiceCommand(candidates)
+        addVoiceLogEntry(heardText, resultLabel)
+    }
+
+    /**
+     * Sinusubukan ang bawat alternative na resulta ng recognizer hanggang may tumama.
+     * Nag-re-return ng short label kung ano ang tumama, para ma-log sa Voice Log.
+     */
+    private fun processVoiceCommand(candidates: List<String>): String {
         for (text in candidates) {
             val custom = commandStore.findMatch(text)
             if (custom != null) {
@@ -739,7 +775,7 @@ class MainActivity : ComponentActivity() {
                 if (custom.action.isNotBlank()) {
                     sendCommandToEsp32(custom.action)
                 }
-                return
+                return "custom: \"${custom.trigger}\""
             }
 
             when {
@@ -747,17 +783,17 @@ class MainActivity : ComponentActivity() {
                 text.contains("hinto") || text.contains("stop") || text.contains("tigil") -> {
                     speak("Hihinto na po!")
                     sendCommandToEsp32("STOP")
-                    return
+                    return "STOP"
                 }
                 text.contains("kaliwa") || text.contains("left") -> {
                     speak("Lilikot sa kaliwa.")
-                    sendCommandToEsp32("LEFT")
-                    return
+                    sendTimedCommand("LEFT")
+                    return "LEFT"
                 }
                 text.contains("kanan") || text.contains("right") -> {
                     speak("Lilikot sa kanan.")
-                    sendCommandToEsp32("RIGHT")
-                    return
+                    sendTimedCommand("RIGHT")
+                    return "RIGHT"
                 }
 
                 // Info Voice Commands
@@ -769,14 +805,54 @@ class MainActivity : ComponentActivity() {
                         else -> "Wala akong nakikitang tao ngayon."
                     }
                     speak(reply)
-                    return
+                    return "sino ako"
                 }
                 text.contains("sino ka") -> {
                     speak("ako ay si rustech")
-                    return
+                    return "sino ka"
                 }
             }
         }
+        return "walang tumugma"
+    }
+
+    private fun addVoiceLogEntry(heard: String, result: String) {
+        voiceLog.add(0, Triple(System.currentTimeMillis(), heard, result))
+        if (voiceLog.size > voiceLogMaxSize) {
+            voiceLog.removeAt(voiceLog.size - 1)
+        }
+    }
+
+    private fun showVoiceLogDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 24)
+        }
+
+        if (voiceLog.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "Wala pang narinig na boses sa session na ito."
+                setPadding(0, 0, 0, 24)
+            })
+        } else {
+            val timeFormat = SimpleDateFormat("hh:mm:ss a", Locale.getDefault())
+            for ((timestamp, heard, result) in voiceLog) {
+                container.addView(TextView(this).apply {
+                    text = "${timeFormat.format(Date(timestamp))} — \"$heard\" → $result"
+                    textSize = 12f
+                    setPadding(0, 8, 0, 8)
+                })
+            }
+        }
+
+        val scrollView = ScrollView(this).apply { addView(container) }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("🗒️ Voice Log")
+            .setView(scrollView)
+            .setPositiveButton("I-clear") { _, _ -> voiceLog.clear() }
+            .setNegativeButton("Isara", null)
+            .show()
     }
 
     private fun speak(phrase: String) {
@@ -833,6 +909,29 @@ class MainActivity : ComponentActivity() {
         if (now - lastSendTime < sendIntervalMs) return
         lastSendTime = now
         sendCommandToEsp32(command)
+    }
+
+    /**
+     * Para sa mga voice-triggered na galaw (hal. "kaliwa"/"kanan"): paulit-ulit magpapadala
+     * ng command sa loob ng ilang segundo (bawat 300ms - mas mabilis pa sa ESP32's
+     * FACE_COMMAND_TIMEOUT na 600ms) para hindi ma-override ng autonomous/ultrasonic logic
+     * ng ESP32 bago pa matapos yung galaw. Isang beses lang na command dati ang sanhi ng
+     * "pipitik" na problema.
+     */
+    private fun sendTimedCommand(command: String, durationMs: Long = 1500L) {
+        val handler = Handler(mainLooper)
+        val endTime = System.currentTimeMillis() + durationMs
+        val runnable = object : Runnable {
+            override fun run() {
+                sendCommandToEsp32(command)
+                if (System.currentTimeMillis() < endTime) {
+                    handler.postDelayed(this, 300)
+                } else {
+                    sendCommandToEsp32("STOP")
+                }
+            }
+        }
+        handler.post(runnable)
     }
 
     private fun sendCommandToEsp32(command: String) {
