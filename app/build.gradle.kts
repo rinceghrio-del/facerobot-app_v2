@@ -42,8 +42,8 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.0")
-    implementation 'com.alphacephei:vosk-android:0.3.47'
-    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
     // CameraX - para sa camera preview at frame analysis
     val cameraxVersion = "1.3.4"
