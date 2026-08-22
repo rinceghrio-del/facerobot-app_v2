@@ -15,20 +15,15 @@ import kotlin.math.min
 
 /**
  * Simpleng wrapper para sa isang YOLOv8-style TFLite model (anchor-free, output shape
- * [1, 4 + numClasses, numBoxes]) na ginagamit lang para tignan kung MAY TAO ba sa frame.
+ * [1, 4 + numClasses, numBoxes]). Dating "person-only" detector lang ito, ngayon ay
+ * general-purpose na - kaya nang mag-detect ng kahit anong COCO class (tignan ang
+ * PERSON_CLASS_INDEX, CAT_CLASS_INDEX, DOG_CLASS_INDEX sa baba, dagdagan lang kung
+ * may gusto pang ibang class).
  *
  * PAALALA IDOL: Hindi kasama dito ang aktwal na model file. Kailangan mong maglagay ng
  * ".tflite" file sa: app/src/main/assets/yolo_person.tflite
  *
- * Saan kukuha ng model:
- *  - I-export mula sa Ultralytics YOLOv8n (COCO, 80 classes, "person" = class 0):
- *      pip install ultralytics
- *      yolo export model=yolov8n.pt format=tflite imgsz=320
- *    Lalabas na yolov8n_saved_model/yolov8n_float16.tflite - palitan pangalan/ilagay sa assets.
- *  - O kaya maghanap ng ready-made "yolov8n-fp16.tflite" sa GitHub/HuggingFace.
- *  - Kung gusto mo mas magaan, pwede mag-export ng int8 quantized version.
- *
- * Kung custom-trained ang model mo (person-only, 1 class), i-adjust ang PERSON_CLASS_INDEX
+ * Kung custom-trained ang model mo (person-only, 1 class), i-adjust ang mga class index
  * at NUM_CLASSES sa baba.
  */
 class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person.tflite") {
@@ -38,11 +33,18 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
         const val INPUT_SIZE = 320          // dapat tugma sa imgsz na ginamit sa export
         const val NUM_CLASSES = 80          // COCO default; baguhin kung custom-trained
         const val PERSON_CLASS_INDEX = 0    // "person" ang class 0 sa COCO
+        const val CAT_CLASS_INDEX = 15      // "cat" ang class 15 sa COCO
+        const val DOG_CLASS_INDEX = 16      // "dog" ang class 16 sa COCO
         const val CONF_THRESHOLD = 0.5f
         const val IOU_THRESHOLD = 0.45f
+
+        // Mga class na ginagamit sa app para sa "may hayop" na detection - dagdagan
+        // lang dito kung gusto ng ibang klase (tignan ang COCO 80-class list).
+        val PET_CLASSES = setOf(CAT_CLASS_INDEX, DOG_CLASS_INDEX)
     }
 
-    data class Detection(val box: RectF, val confidence: Float)
+    // label = Filipino na pangalan ng class, direktang magagamit sa TTS/UI
+    data class Detection(val box: RectF, val confidence: Float, val classId: Int, val label: String)
 
     private var interpreter: Interpreter? = null
     val isReady: Boolean get() = interpreter != null
@@ -54,7 +56,7 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
     private var isNchw = false
 
     // Para sa on-device debugging (walang adb/logcat kailangan) - nakikita mismo sa
-    // status text ng app kung gaano "kalapit" ang YOLO sa pag-detect ng tao.
+    // status text ng app kung gaano "kalapit" ang YOLO sa pag-detect.
     var lastMaxPersonScore: Float = 0f
         private set
     var lastError: String? = null
@@ -72,7 +74,7 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
             Log.i(TAG, "YOLO model loaded: $modelAssetName (input shape=${inputShape.toList()}, isNchw=$isNchw)")
         } catch (e: Exception) {
             // Sadyang hindi natin ipapa-crash ang app kung wala pa/mali ang model file -
-            // gagana pa rin ang RoboEyes, wala lang auto person-detection.
+            // gagana pa rin ang RoboEyes, wala lang auto detection.
             Log.e(TAG, "Hindi na-load ang YOLO model ($modelAssetName). Ilagay ito sa assets/.", e)
             interpreter = null
         }
@@ -86,8 +88,31 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
         }
     }
 
-    /** Nagbabalik ng listahan ng "person" detections. Empty list kung wala o kung walang model. */
+    private fun labelFor(classId: Int): String = when (classId) {
+        PERSON_CLASS_INDEX -> "tao"
+        CAT_CLASS_INDEX -> "pusa"
+        DOG_CLASS_INDEX -> "aso"
+        else -> "class_$classId"
+    }
+
+    /** Dating behavior - "person" detections lang. Hindi ginalaw para di masira ang existing calls. */
     fun detectPersons(bitmap: Bitmap): List<Detection> {
+        return detect(bitmap, setOf(PERSON_CLASS_INDEX))
+    }
+
+    /** Bagong function - "aso"/"pusa" detections lang. */
+    fun detectPets(bitmap: Bitmap): List<Detection> {
+        return detect(bitmap, PET_CLASSES)
+    }
+
+    /**
+     * General-purpose na detection - iisang inference call lang bawat tawag, tapos
+     * hinahanap lang natin yung mga class na nasa loob ng `classesOfInterest`. Kung
+     * kailangan mo ng person AT pets sa parehong frame, mas mabuting isang tawag na
+     * lang dito na may parehong class indices, imbes na tawagin nang hiwalay ang
+     * detectPersons() at detectPets() (doble ang gagastusing inference kung ganon).
+     */
+    fun detect(bitmap: Bitmap, classesOfInterest: Set<Int>): List<Detection> {
         val interp = interpreter ?: return emptyList()
 
         val resized = ImageUtils.resize(bitmap, INPUT_SIZE)
@@ -105,7 +130,7 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
             return emptyList()
         }
 
-        return decodeOutput(output[0], outputShape, bitmap.width, bitmap.height)
+        return decodeOutput(output[0], outputShape, bitmap.width, bitmap.height, classesOfInterest)
     }
 
     private fun bitmapToInputBuffer(bitmap: Bitmap): ByteBuffer {
@@ -133,26 +158,38 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
 
     /**
      * Output layout na inaasahan: [numAttributes][numBoxes] kung saan numAttributes = 4 + NUM_CLASSES
-     * (cx, cy, w, h, tapos yung class scores). Ito ang karaniwang layout ng YOLOv8 tflite export
-     * na naka-transpose na. Kung iba ang shape ng model mo, i-adjust ito.
+     * (cx, cy, w, h, tapos yung class scores). Para sa bawat box, hinahanap ang pinakamataas
+     * na class score SA LOOB LANG ng classesOfInterest (hal. {person} o {cat, dog}) - hindi
+     * lahat ng 80 classes, para mabilis pa rin at hindi ma-confuse ng ibang class na
+     * hindi naman natin pinapansin.
      */
     private fun decodeOutput(
         output: Array<FloatArray>,
         shape: IntArray,
         origWidth: Int,
-        origHeight: Int
+        origHeight: Int,
+        classesOfInterest: Set<Int>
     ): List<Detection> {
         val numAttrs = shape[1]
         val numBoxes = shape[2]
-        if (numAttrs < 4 + PERSON_CLASS_INDEX + 1) return emptyList()
+        val maxClassIndex = classesOfInterest.maxOrNull() ?: return emptyList()
+        if (numAttrs < 4 + maxClassIndex + 1) return emptyList()
 
         val candidates = mutableListOf<Detection>()
         var maxScore = 0f
 
         for (i in 0 until numBoxes) {
-            val classScore = output[4 + PERSON_CLASS_INDEX][i]
-            if (classScore > maxScore) maxScore = classScore
-            if (classScore < CONF_THRESHOLD) continue
+            var bestClassId = -1
+            var bestScore = 0f
+            for (classId in classesOfInterest) {
+                val score = output[4 + classId][i]
+                if (score > bestScore) {
+                    bestScore = score
+                    bestClassId = classId
+                }
+            }
+            if (bestScore > maxScore) maxScore = bestScore
+            if (bestClassId == -1 || bestScore < CONF_THRESHOLD) continue
 
             val cx = output[0][i] / INPUT_SIZE * origWidth
             val cy = output[1][i] / INPUT_SIZE * origHeight
@@ -160,7 +197,7 @@ class YoloPersonDetector(context: Context, modelAssetName: String = "yolo_person
             val h = output[3][i] / INPUT_SIZE * origHeight
 
             val rect = RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
-            candidates.add(Detection(rect, classScore))
+            candidates.add(Detection(rect, bestScore, bestClassId, labelFor(bestClassId)))
         }
 
         lastMaxPersonScore = maxScore
