@@ -136,6 +136,12 @@ class MainActivity : ComponentActivity() {
     private val voiceLog = mutableListOf<Triple<Long, String, String>>()
     private val voiceLogMaxSize = 100
 
+    // Ilang ms ang paulit-ulit na pagpapadala ng movement command galing sa boses
+    // (kaliwa/kanan/sulong/atras) bago mag-STOP. Dagdagan ito kung gusto ng mas
+    // mahabang galaw bago tumigil ang robot.
+    private val voiceMovementDurationMs = 3000L
+    private val movementActions = setOf("FORWARD", "BACKWARD", "LEFT", "RIGHT")
+
     private val faceDetectorOptions = FaceDetectorOptions.Builder()
         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
         .build()
@@ -773,7 +779,14 @@ class MainActivity : ComponentActivity() {
             if (custom != null) {
                 speak(custom.reply)
                 if (custom.action.isNotBlank()) {
-                    sendCommandToEsp32(custom.action)
+                    val actionUpper = custom.action.uppercase()
+                    if (actionUpper in movementActions) {
+                        // Movement action din ito (FORWARD/BACKWARD/LEFT/RIGHT) - paulit-ulit
+                        // ipapadala para hindi ma-cut ng ESP32's FACE_COMMAND_TIMEOUT
+                        sendTimedCommand(actionUpper, voiceMovementDurationMs)
+                    } else {
+                        sendCommandToEsp32(custom.action)
+                    }
                 }
                 return "custom: \"${custom.trigger}\""
             }
@@ -787,12 +800,12 @@ class MainActivity : ComponentActivity() {
                 }
                 text.contains("kaliwa") || text.contains("left") -> {
                     speak("Lilikot sa kaliwa.")
-                    sendTimedCommand("LEFT")
+                    sendTimedCommand("LEFT", voiceMovementDurationMs)
                     return "LEFT"
                 }
                 text.contains("kanan") || text.contains("right") -> {
                     speak("Lilikot sa kanan.")
-                    sendTimedCommand("RIGHT")
+                    sendTimedCommand("RIGHT", voiceMovementDurationMs)
                     return "RIGHT"
                 }
 
@@ -912,13 +925,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Para sa mga voice-triggered na galaw (hal. "kaliwa"/"kanan"): paulit-ulit magpapadala
-     * ng command sa loob ng ilang segundo (bawat 300ms - mas mabilis pa sa ESP32's
-     * FACE_COMMAND_TIMEOUT na 600ms) para hindi ma-override ng autonomous/ultrasonic logic
-     * ng ESP32 bago pa matapos yung galaw. Isang beses lang na command dati ang sanhi ng
-     * "pipitik" na problema.
+     * Para sa mga voice-triggered na galaw (hal. "kaliwa"/"kanan" o custom FORWARD/BACKWARD):
+     * paulit-ulit magpapadala ng command sa loob ng ilang segundo (bawat 300ms - mas mabilis
+     * pa sa ESP32's FACE_COMMAND_TIMEOUT na 600ms) para hindi ma-override ng
+     * autonomous/ultrasonic logic ng ESP32 bago pa matapos yung galaw. Dagdagan ang
+     * durationMs kung gusto ng mas mahabang galaw.
      */
-    private fun sendTimedCommand(command: String, durationMs: Long = 1500L) {
+    private fun sendTimedCommand(command: String, durationMs: Long) {
         val handler = Handler(mainLooper)
         val endTime = System.currentTimeMillis() + durationMs
         val runnable = object : Runnable {
