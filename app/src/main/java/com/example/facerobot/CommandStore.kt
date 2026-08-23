@@ -103,9 +103,10 @@ fun seedDefaultsIfNeeded() {
         VoiceCommand("sayaw", "ok sige sasayaw ako.. wag ka tatawa ha!", "DANCE"),
         VoiceCommand("ilang taon kana", "wala akong edad pero kagagawa lang sa akin ni engineer rusty"),
         VoiceCommand("saan ka galing", "sa laboratoryo ni rusty"),
-        VoiceCommand("saan ka nakatira", "nakatira ako sa laboratoryo ni rusty")
-        VoiceCommand("oo kanina pa", "sige, mabuti naman.")
-        VoiceCommand("oo", "OK, OK.")
+        VoiceCommand("saan ka nakatira", "nakatira ako sa laboratoryo ni rusty"),
+        VoiceCommand("oo kanina pa", "sige, mabuti naman."),
+        VoiceCommand("oo", "OK, OK."),
+        VoiceCommand("paano ka ginawa", "AKO AY BINUO SA LIKHANG ISIP NI RUSTY"),
     )
 
     for (cmd in defaults) {
