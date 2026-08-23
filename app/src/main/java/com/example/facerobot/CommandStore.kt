@@ -110,8 +110,8 @@ fun seedDefaultsIfNeeded() {
         VoiceCommand("nakakain ka ba ng pagkain", "ayaw! ayaw! kuryente lang kinakain ko", "SHAKING"),
         VoiceCommand("ikaw ba kumain na", "hindi ako nakain", "SHAKING"),
         VoiceCommand("power meter", "OK! OK!"),
-        VoiceCommand("buksan ang laser", "sige, binubuksan ko na"),
-        VoiceCommand("patayin ang laser", "sige pinapatay ko na"),
+        VoiceCommand("buksan ang laser", "sige, binubuksan ko na", "LASER_ON"),
+        VoiceCommand("patayin ang laser", "sige pinapatay ko na", "LASER_OFF"),
     )
 
     for (cmd in defaults) {
