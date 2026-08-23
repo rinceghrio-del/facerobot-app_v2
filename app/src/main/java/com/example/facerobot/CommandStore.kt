@@ -105,8 +105,13 @@ fun seedDefaultsIfNeeded() {
         VoiceCommand("saan ka galing", "sa laboratoryo ni rusty"),
         VoiceCommand("saan ka nakatira", "nakatira ako sa laboratoryo ni rusty"),
         VoiceCommand("oo kanina pa", "sige, mabuti naman."),
-        VoiceCommand("oo", "OK, OK."),
+        VoiceCommand("oo", "OK!, OK!."),
         VoiceCommand("paano ka ginawa", "AKO AY BINUO SA LIKHANG ISIP NI RUSTY"),
+        VoiceCommand("nakakain ka ba ng pagkain", "ayaw! ayaw! kuryente lang kinakain ko", "SHAKING"),
+        VoiceCommand("ikaw ba kumain na", "hindi ako nakain", "SHAKING"),
+        VoiceCommand("power meter", "OK! OK!"),
+        VoiceCommand("buksan ang laser", "sige, binubuksan ko na"),
+        VoiceCommand("patayin ang laser", "sige pinapatay ko na"),
     )
 
     for (cmd in defaults) {
