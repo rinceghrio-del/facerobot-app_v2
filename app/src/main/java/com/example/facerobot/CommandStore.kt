@@ -75,6 +75,44 @@ class CommandStore(context: Context) {
         persist()
     }
 
+    /**
+ * Isang beses lang tatakbo ito (may naka-save na flag) - naglalagay ng mga paunang
+ * custom command na ginawa na ni idol, para hindi na kailangan i-type ulit tuwing
+ * bagong install/build. Kung may tatanggalin siya dito mamaya via "Mga Utos" menu,
+ * hindi na ito babalik - isang beses lang talaga ito tumatakbo.
+ */
+fun seedDefaultsIfNeeded() {
+    if (prefs.getBoolean(KEY_DEFAULTS_SEEDED, false)) return
+
+    val defaults = listOf(
+        VoiceCommand("abante", "ok sige", "FORWARD"),
+        VoiceCommand("saan ka papunta", "wala akong pupuntahan paikot ikot lang ako dito", "RIGHT"),
+        VoiceCommand("sino ba si rasti", "si rusty yung magaling na developer! nagtatrabaho sa globe. at nakatira sa pagbilao"),
+        VoiceCommand("sino si rasti", "si rusty yung magaling na developer! nagtatrabaho sa globe. at nakatira sa pagbilao"),
+        VoiceCommand("ayaw ko nga", "sige kung ayaw mo eh diwag"),
+        VoiceCommand("oo ang pangit", "ikaw pangit din"),
+        VoiceCommand("nakaupo", "sige upo ka lang diyan"),
+        VoiceCommand("mas pangit ka", "eh di wow"),
+        VoiceCommand("ikaw saan papunta", "ikot ikot lang", "LEFT"),
+        VoiceCommand("ikaw sa'n papunta", "ikot lng ng ikot dito", "LEFT"),
+        VoiceCommand("ayaw ko", "kung ayaw mo wag mo"),
+        VoiceCommand("ok lang", "sige mabuti at ok lang"),
+        VoiceCommand("ikaw anong gawa mo", "paikot ikot lang", "LEFT"),
+        VoiceCommand("anong gawa mo", "ikot ikot lang", "LEFT"),
+        VoiceCommand("oo ang ganda", "oo naman., pogi kasi ang gumawa sa akin", "FORWARD"),
+        VoiceCommand("sayaw", "ok sige sasayaw ako.. wag ka tatawa ha!", "DANCE"),
+        VoiceCommand("ilang taon kana", "wala akong edad pero kagagawa lang sa akin ni engineer rusty"),
+        VoiceCommand("saan ka galing", "sa laboratoryo ni rusty"),
+        VoiceCommand("saan ka nakatira", "nakatira ako sa laboratoryo ni rusty")
+    )
+
+    for (cmd in defaults) {
+        add(cmd.trigger, cmd.reply, cmd.action)
+    }
+
+    prefs.edit().putBoolean(KEY_DEFAULTS_SEEDED, true).apply()
+}
+
     fun all(): List<VoiceCommand> = commands.toList()
 
     /** Hinahanap ang unang command na "nakapaloob" sa sinabi ng user. Null kung wala. */
