@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
     private var lastRecognitionTime = 0L
     private val recognitionIntervalMs = 600L
 
-    private val closeFaceWidthRatio = 0.40f
+    private val closeFaceWidthRatio = 0.30f
 
     private var lastPersonSeenTime = 0L
     private val personTimeoutMs = 4000L
@@ -621,7 +621,7 @@ class MainActivity : ComponentActivity() {
         "Ngayon ka lan ba naka kita ng laruan na kagaya ko",
         "Kumain na ba kayo",
         "tara laro tayo",
-        "Huwag mo ako kalimutan na icharge!",
+        "Huwag mo ako kalimutan na e charge!",
         
         
     )
