@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
     private var lastRecognitionTime = 0L
     private val recognitionIntervalMs = 600L
 
-    private val closeFaceWidthRatio = 0.30f
+    private val closeFaceWidthRatio = 0.35f
 
     private var lastPersonSeenTime = 0L
     private val personTimeoutMs = 4000L
