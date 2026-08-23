@@ -36,7 +36,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.example.facerobot.ui.RoboEyesView
 import com.example.facerobot.vision.FaceEmbedder
 import com.example.facerobot.vision.FaceStore
 import com.example.facerobot.vision.ImageUtils
@@ -73,7 +72,6 @@ class MainActivity : ComponentActivity() {
     private enum class AppState { EYES, CAMERA }
 
     private lateinit var rootLayout: FrameLayout
-    private lateinit var roboEyesView: RoboEyesView
     private lateinit var previewView: PreviewView
     private lateinit var statusText: TextView
     private lateinit var menuButton: Button
@@ -234,7 +232,6 @@ class MainActivity : ComponentActivity() {
 
     private fun buildUi() {
         rootLayout = FrameLayout(this)
-        roboEyesView = RoboEyesView(this)
         previewView = PreviewView(this)
 
         val accentColor = 0xFF00E5C7.toInt()
@@ -265,10 +262,6 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { showMainMenuDialog() }
         }
 
-        rootLayout.addView(
-            roboEyesView,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        )
         rootLayout.addView(
             previewView,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
@@ -400,10 +393,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showEyesUi() {
         appState = AppState.EYES
-        roboEyesView.visibility = View.VISIBLE
-        previewView.visibility = View.INVISIBLE
         canEnroll = false
-        roboEyesView.setMood(RoboEyesView.Mood.SEARCHING)
         statusText.text = if (yoloDetector.isReady) {
             "Naghahanap ng tao..."
         } else {
@@ -417,8 +407,6 @@ class MainActivity : ComponentActivity() {
 
     private fun showCameraUi() {
         appState = AppState.CAMERA
-        roboEyesView.visibility = View.GONE
-        previewView.visibility = View.VISIBLE
         lastPersonSeenTime = System.currentTimeMillis()
         statusText.text = "May tao! Sinusubukang kilalanin..."
     }
@@ -512,7 +500,6 @@ class MainActivity : ComponentActivity() {
             }
 
             if (consecutivePersonDetections >= requiredConsecutiveDetections) {
-                runOnUi { roboEyesView.setMood(RoboEyesView.Mood.ALERT) }
                 rootLayout.postDelayed({
                     if (appState == AppState.EYES && consecutivePersonDetections >= requiredConsecutiveDetections) {
                         showCameraUi()
@@ -1083,6 +1070,13 @@ private fun computeCommand(box: Rect, frameWidth: Int): String {
                     layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 })
                 row.addView(Button(this@MainActivity).apply {
+                    text = "I-edit"
+                    textSize = 10f
+                    setOnClickListener {
+                        showEditCommandDialog(cmd)
+                    }
+                })
+                row.addView(Button(this@MainActivity).apply {
                     text = "Tanggalin"
                     textSize = 10f
                     setOnClickListener {
@@ -1133,6 +1127,61 @@ private fun computeCommand(box: Rect, frameWidth: Int): String {
                 }
             }
             .setNegativeButton("Isara", null)
+            .show()
+    }
+
+    /**
+     * Dialog para baguhin ang trigger/reply/action ng isang existing command. Kung binago
+     * ang trigger text, tinatanggal muna natin ang luma bago idagdag ang bago - kasi
+     * exact-match lang ang findMatch ng CommandStore.add() para mag-upsert.
+     */
+    private fun showEditCommandDialog(cmd: CommandStore.VoiceCommand) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 24)
+        }
+
+        val triggerInput = EditText(this).apply {
+            hint = "Sasabihin"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(cmd.trigger)
+        }
+        val replyInput = EditText(this).apply {
+            hint = "Isasagot ng robot"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(cmd.reply)
+        }
+        val actionInput = EditText(this).apply {
+            hint = "ESP32 action (opsyonal)"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(cmd.action)
+        }
+        container.addView(TextView(this).apply { text = "Sasabihin:" })
+        container.addView(triggerInput)
+        container.addView(TextView(this).apply { text = "Isasagot ng robot:"; setPadding(0, 24, 0, 0) })
+        container.addView(replyInput)
+        container.addView(TextView(this).apply { text = "ESP32 action:"; setPadding(0, 24, 0, 0) })
+        container.addView(actionInput)
+
+        val scrollView = ScrollView(this).apply { addView(container) }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("I-edit ang Command")
+            .setView(scrollView)
+            .setPositiveButton("I-save") { _, _ ->
+                val newTrigger = triggerInput.text.toString().trim()
+                val newReply = replyInput.text.toString().trim()
+                val newAction = actionInput.text.toString().trim()
+                if (newTrigger.isNotEmpty() && newReply.isNotEmpty()) {
+                    if (newTrigger != cmd.trigger) {
+                        commandStore.remove(cmd.trigger)
+                    }
+                    commandStore.add(newTrigger, newReply, newAction)
+                    statusText.text = "Na-update: \"$newTrigger\""
+                }
+                showManageCommandsDialog()
+            }
+            .setNegativeButton("Cancel") { _, _ -> showManageCommandsDialog() }
             .show()
     }
 
