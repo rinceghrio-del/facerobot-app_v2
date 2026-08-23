@@ -109,6 +109,8 @@ class MainActivity : ComponentActivity() {
     private var lastRecognitionTime = 0L
     private val recognitionIntervalMs = 600L
 
+    private val closeFaceWidthRatio = 0.55f
+
     private var lastPersonSeenTime = 0L
     private val personTimeoutMs = 4000L
 
@@ -126,7 +128,7 @@ class MainActivity : ComponentActivity() {
     private val petGreetingCooldownMs = 45_000L
     private val petGreetings = mapOf(
         "pusa" to listOf("Meow! Kumusta pusa!", "Ay, may pusa! Ang cute!", "Hi pusa, gusto mo bang makipaglaro?"),
-        "aso" to listOf("Woof woof! Kumusta aso!", "Ay, may aso! Kaibigan ko yan.", "Hi doggo!")
+        "aso" to listOf("Woof woof! Kumusta aso!", "Ay, may aso! Kaibigan ko yan.", "Hi doggi!")
     )
 
     // ---------- Vosk offline speech recognition ----------
@@ -557,7 +559,7 @@ class MainActivity : ComponentActivity() {
         val frameHeight = imageProxy.height
 
         // Kukunin lang ang LEFT/RIGHT o STOP (Paggitna)
-        val command = computeCommand(box.centerX(), frameWidth)
+        val command = computeCommand(box, frameWidth)
         sendCommandThrottled(command)
 
         val now = System.currentTimeMillis()
@@ -605,6 +607,9 @@ class MainActivity : ComponentActivity() {
         "Ay, si %s! Kumusta?",
         "Magandang araw, %s!",
         "Gusto mo bang makipag laro sakin %s!",
+        "%s! kumain kana ba",
+        "%s! Tara laro tayo",
+        "Ikaw ba %s! ay nakapag pahinga ng maayos, wag ka ka babad sa pagkocode, tumagay ka rin",
     )
 
     private val unknownGreetings = listOf(
@@ -614,6 +619,11 @@ class MainActivity : ComponentActivity() {
         "Hello! Pwede mo ba akong Kausapin?",
         "Hi! kausapin mo ako",
         "Ngayon ka lan ba naka kita ng laruan na kagaya ko",
+        "Kumain na ba kayo",
+        "tara laro tayo",
+        "Huwag mo ako kalimutan na icharge!",
+        
+        
     )
 
     private fun greetIfNeeded(name: String) {
@@ -920,13 +930,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Tanging Panggipit/Centering logic na lang:
-     * Sinusuri kung nasa Kaliwa, Kanan, o Gitna (STOP) ang mukha.
-     */
-    private fun computeCommand(faceCenterX: Int, frameWidth: Int): String {
+   /**
+ * Priyoridad muna ang distansya: kung sobrang lapit na ang mukha (malapad na ang
+ * bounding box kumpara sa frame), mag-BACKWARD muna. Kung hindi naman malapit,
+ * saka lang natin susuriin ang Kaliwa/Kanan/Gitna para sa centering.
+ */
+private fun computeCommand(box: Rect, frameWidth: Int): String {
+    val faceWidthRatio = box.width().toFloat() / frameWidth.toFloat()
+    if (faceWidthRatio > closeFaceWidthRatio) {
+        return "BACKWARD"
+    }
+
+    val faceCenterX = box.centerX()
     val screenCenterX = frameWidth / 2
-    
+
     // Pinalapad ang deadzone (ginawang frameWidth / 3.5)
     // Mas malapad na gitnang espasyo para may allowance bago mag-STOP
     val centerDeadzoneWidth = (frameWidth / 3.5 / 2).toInt()
