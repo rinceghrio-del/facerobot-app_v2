@@ -121,6 +121,14 @@ class MainActivity : ComponentActivity() {
     private val greetingCooldownMs = 60_000L
     private var lastUnknownGreetTime = 0L
 
+    // ---------- Pet (aso/pusa) detection ----------
+    private var lastPetGreetTime = 0L
+    private val petGreetingCooldownMs = 45_000L
+    private val petGreetings = mapOf(
+        "pusa" to listOf("Meow! Kumusta pusa!", "Ay, may pusa! Ang cute!", "Hi pusa, gusto mo bang makipaglaro?"),
+        "aso" to listOf("Woof woof! Kumusta aso!", "Ay, may aso! Kaibigan ko yan.", "Hi doggo!")
+    )
+
     // ---------- Vosk offline speech recognition ----------
     private var voskModel: Model? = null
     private var speechService: SpeechService? = null
@@ -158,6 +166,7 @@ class MainActivity : ComponentActivity() {
         faceEmbedder = FaceEmbedder(this)
         faceStore = FaceStore(this)
         commandStore = CommandStore(this)
+        commandStore.seedDefaultsIfNeeded()
 
         buildUi()
         showEyesUi()
@@ -483,12 +492,21 @@ class MainActivity : ComponentActivity() {
 
         try {
             val bitmap = ImageUtils.imageProxyToBitmap(imageProxy)
-            val detections = yoloDetector.detectPersons(bitmap)
+            val detections = yoloDetector.detect(
+                bitmap,
+                setOf(YoloPersonDetector.PERSON_CLASS_INDEX) + YoloPersonDetector.PET_CLASSES
+            )
+            val personDetections = detections.filter { it.classId == YoloPersonDetector.PERSON_CLASS_INDEX }
+            val petDetections = detections.filter { it.classId in YoloPersonDetector.PET_CLASSES }
 
-            if (detections.isNotEmpty()) {
+            if (personDetections.isNotEmpty()) {
                 consecutivePersonDetections++
             } else {
                 consecutivePersonDetections = 0
+            }
+
+            if (petDetections.isNotEmpty()) {
+                runOnUi { greetPetIfNeeded(petDetections.first().label) }
             }
 
             if (consecutivePersonDetections >= requiredConsecutiveDetections) {
@@ -618,6 +636,15 @@ class MainActivity : ComponentActivity() {
 
         if (!ttsReady) return
         speak(unknownGreetings.random())
+    }
+
+    private fun greetPetIfNeeded(label: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastPetGreetTime < petGreetingCooldownMs) return
+        lastPetGreetTime = now
+        if (!ttsReady) return
+        val options = petGreetings[label] ?: return
+        speak(options.random())
     }
 
     // ---------- Vosk offline voice recognition ----------
