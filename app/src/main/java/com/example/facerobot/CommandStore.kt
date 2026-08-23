@@ -15,6 +15,7 @@ class CommandStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "command_store"
         private const val KEY_COMMANDS = "custom_commands_json"
+        private const val KEY_DEFAULTS_SEEDED = "defaults_seeded_v1"
     }
 
     // action = "" kung walang ipapadalang utos sa ESP32, magsasalita lang.
