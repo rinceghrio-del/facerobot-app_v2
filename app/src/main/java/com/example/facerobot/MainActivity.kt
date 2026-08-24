@@ -166,7 +166,27 @@ class MainActivity : ComponentActivity() {
         faceEmbedder = FaceEmbedder(this)
         faceStore = FaceStore(this)
         commandStore = CommandStore(this)
-        commandStore.seedDefaultsIfNeeded()
+                commandStore.seedDefaultsIfNeeded()
+
+        // Llama offline fallback - i-download/i-load sa background
+        Thread {
+            if (!ModelDownloader.isModelDownloaded(this)) {
+                runOnUi { statusText.text = "⬇️ Dina-download ang Llama model..." }
+                ModelDownloader.downloadModel(
+                    this,
+                    onProgress = { pct -> runOnUi { statusText.text = "⬇️ Llama model... $pct%" } },
+                    onDone = { success ->
+                        if (success) {
+                            val ok = LlamaBridge.loadModel(ModelDownloader.getModelFile(this).absolutePath)
+                            runOnUi { statusText.text = if (ok) "🧠 Llama ready" else "❌ Llama load failed" }
+                        }
+                    }
+                )
+            } else {
+                val ok = LlamaBridge.loadModel(ModelDownloader.getModelFile(this).absolutePath)
+                if (!ok) runOnUi { statusText.text = "❌ Llama load failed" }
+            }
+        }.start()
 
         buildUi()
         showEyesUi()
@@ -844,13 +864,37 @@ class MainActivity : ComponentActivity() {
                     speak(reply)
                     return "sino ako"
                 }
-                text.contains("sino ka") -> {
+                                text.contains("sino ka") -> {
                     speak("ako ay si rustech")
                     return "sino ka"
                 }
             }
         }
-        return "walang tumugma"
+
+        // Walang tumugma sa custom commands o built-in patterns - tanungin si Llama
+        handleLlamaFallback(candidates.firstOrNull() ?: "")
+        return "llama fallback"
+    }
+
+    private fun handleLlamaFallback(heardText: String) {
+        if (heardText.isBlank()) return
+        sendCommandToEsp32("THINK")  // reaction habang nag-iisip si Llama
+        Thread {
+            val reply = try {
+                LlamaBridge.generate(heardText)
+            } catch (e: Exception) {
+                ""
+            }
+            runOnUi {
+                if (reply.isNotBlank()) {
+                    speak(reply)
+                    sendCommandToEsp32("TALK")
+                } else {
+                    speak("Pasensya na, hindi ko masagot yan ngayon.")
+                    sendCommandToEsp32("STOP")
+                }
+            }
+        }.start()
     }
 
     private fun addVoiceLogEntry(heard: String, result: String) {
