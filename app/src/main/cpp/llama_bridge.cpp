@@ -36,16 +36,23 @@ Java_com_example_facerobot_LlamaBridge_loadModel(JNIEnv* env, jobject, jstring m
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring prompt) {
     const char* p = env->GetStringUTFChars(prompt, nullptr);
-    std::string fullPrompt = std::string("<|user|>\n") + p + "\n<|assistant|>\n";
+    // Tamang Llama 3.2 Instruct chat template (hindi na kasama <|begin_of_text|>
+    // dahil awtomatiko nang idinaragdag ng common_tokenize kapag add_special=true)
+    std::string fullPrompt =
+        "<|start_header_id|>system<|end_header_id|>\n\n"
+        "Ikaw ay si Rustech, isang helpful robot assistant. Sumagot nang maikli (1-2 pangungusap) sa Taglish.<|eot_id|>"
+        "<|start_header_id|>user<|end_header_id|>\n\n" + std::string(p) + "<|eot_id|>"
+        "<|start_header_id|>assistant<|end_header_id|>\n\n";
     env->ReleaseStringUTFChars(prompt, p);
 
-    std::vector<llama_token> tokens = common_tokenize(g_ctx, fullPrompt, true);
+    std::vector<llama_token> tokens = common_tokenize(g_ctx, fullPrompt, true, true);
     llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
     if (llama_decode(g_ctx, batch) != 0) return env->NewStringUTF("");
 
     std::string result;
     int n_vocab = llama_vocab_n_tokens(g_vocab);
-    for (int i = 0; i < 200; i++) {
+    // Binawasan mula 200 -> 80 tokens para mas mabilis mag-sagot (mas maikling reply)
+    for (int i = 0; i < 80; i++) {
         auto* logits = llama_get_logits_ith(g_ctx, batch.n_tokens - 1);
         llama_token new_token = 0;
         float best = logits[0];
@@ -60,5 +67,6 @@ Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring pr
         batch = llama_batch_get_one(&tok, 1);
         if (llama_decode(g_ctx, batch) != 0) break;
     }
+    LOGI("Llama reply (%d chars): %s", (int)result.size(), result.c_str());
     return env->NewStringUTF(result.c_str());
 }
