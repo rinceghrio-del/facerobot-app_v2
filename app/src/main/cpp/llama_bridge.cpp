@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <cstdarg>
 #include <mutex>
+#include <thread>
+#include <algorithm>
 #include <android/log.h>
 #include "llama.h"
 #include "common.h"
@@ -61,8 +63,15 @@ Java_com_example_facerobot_LlamaBridge_loadModel(JNIEnv* env, jobject, jstring m
 
         llama_context_params cparams = llama_context_default_params();
         cparams.n_ctx = 512;      // pinaliit para sa mas mababang RAM usage
-        cparams.n_threads = 2;
-        cparams.n_threads_batch = 2;
+        // Dating naka-hardcode sa 2 threads lang kahit gaano pa karaming cores meron
+        // ang device - isa pa itong sanhi ng sobrang bagal (kasabay ng -O0 debug build).
+        // Gamitin natin ang available cores ng device, pero i-cap sa 4 para may
+        // matirang core para sa camera/YOLO/face-recognition pipeline na tumatakbo rin
+        // nang sabay sa background.
+        unsigned int hwThreads = std::thread::hardware_concurrency();
+        int n_threads = (int)std::min(std::max(hwThreads, 2u), 4u);
+        cparams.n_threads = n_threads;
+        cparams.n_threads_batch = n_threads;
         g_ctx = llama_init_from_model(g_model, cparams);
         if (!g_ctx) { jlog(env, "Failed to create context"); return JNI_FALSE; }
         g_n_ctx = (int)cparams.n_ctx;
