@@ -17,14 +17,15 @@ include(FetchContent)
 FetchContent_Declare(
     llama_cpp
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
-    # Naka-pin sa isang partikular na commit (release tag b10336, ~Agosto 2026) imbis
-    # na "master" - para hindi na basta-basta magbago ang API/behavior sa susunod mong
-    # rebuild kapag nag-update ang upstream llama.cpp. Kung gusto mong palitan ito ng
-    # commit na sigurado mong gumagana sa build mo ngayon, tingnan ang GitHub Actions
-    # log ng huling successful build mo (step na "Configure CMake" / "FetchContent"),
-    # hanapin ang commit hash doon, at ilagay dito.
-    GIT_TAG        4f060bdb1c7a336ecb663db3a03b6b0169e4e21b
-    GIT_SHALLOW    FALSE
+    # Naka-pin sa isang partikular na release TAG (b10336, na-release Agosto 10, 2026,
+    # commit f401bb1 sa totoong ggml-org/llama.cpp repo) imbis na "master" - para hindi
+    # na basta-basta magbago ang API/behavior sa susunod mong rebuild kapag nag-update
+    # ang upstream llama.cpp. Ginamit ang PANGALAN ng tag (hindi raw commit hash) dahil
+    # mas simple at maaasahan itong i-checkout kahit sa shallow clone. Kung gusto mong
+    # palitan ito ng ibang bersyon, tingnan ang https://github.com/ggml-org/llama.cpp/tags
+    # para sa listahan ng mga totoong release tag.
+    GIT_TAG        b10336
+    GIT_SHALLOW    TRUE
 )
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
