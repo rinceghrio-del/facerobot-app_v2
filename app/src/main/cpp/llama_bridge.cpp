@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdio>
 #include <cstdarg>
+#include <mutex>
 #include <android/log.h>
 #include "llama.h"
 #include "common.h"
@@ -13,6 +14,14 @@
 static llama_model* g_model = nullptr;
 static llama_context* g_ctx = nullptr;
 static const llama_vocab* g_vocab = nullptr;
+static int g_n_ctx = 0;
+
+// Pinoprotektahan ng mutex na ito ang g_model/g_ctx. Kahit may guard na sa Kotlin
+// side (llamaBusy flag) laban sa sabay-sabay na tawag, panatilihin din ang lock dito
+// bilang huling proteksyon - ang llama_context ay HINDI thread-safe, at kapag dalawang
+// thread ang sabay na tumawag ng llama_decode() dito, native crash (segfault) ang
+// resulta na hindi mahuhuli ng try/catch, kahit sa C++.
+static std::mutex g_mutex;
 
 // Nagpapadala ng log message papunta sa LlamaBridge.appendLog() sa Kotlin side,
 // para makita ito sa "Llama Log" sa loob ng app menu, kasabay ng normal Logcat print.
@@ -38,6 +47,7 @@ static void jlog(JNIEnv* env, const char* fmt, ...) {
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_facerobot_LlamaBridge_loadModel(JNIEnv* env, jobject, jstring modelPath) {
+    std::lock_guard<std::mutex> lock(g_mutex);
     try {
         const char* path = env->GetStringUTFChars(modelPath, nullptr);
         llama_backend_init();
@@ -55,6 +65,7 @@ Java_com_example_facerobot_LlamaBridge_loadModel(JNIEnv* env, jobject, jstring m
         cparams.n_threads_batch = 2;
         g_ctx = llama_init_from_model(g_model, cparams);
         if (!g_ctx) { jlog(env, "Failed to create context"); return JNI_FALSE; }
+        g_n_ctx = (int)cparams.n_ctx;
 
         jlog(env, "Model loaded successfully");
         return JNI_TRUE;
@@ -69,6 +80,15 @@ Java_com_example_facerobot_LlamaBridge_loadModel(JNIEnv* env, jobject, jstring m
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring prompt) {
+    // try_lock (hindi blocking lock): kung may isa nang generate() na tumatakbo (dapat
+    // hindi na mangyari dahil naka-guard na sa Kotlin side ang llamaBusy), huwag na
+    // itong hintayin at magbalik na lang agad ng "" imbis na sabay-sabay silang
+    // tumira sa parehong context (dun nangyayari ang crash).
+    std::unique_lock<std::mutex> lock(g_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        jlog(env, "generate() ignored - may isa pang generate() na tumatakbo");
+        return env->NewStringUTF("");
+    }
     try {
         if (!g_ctx || !g_model || !g_vocab) {
             jlog(env, "generate() called but model not loaded");
@@ -84,6 +104,27 @@ Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring pr
         env->ReleaseStringUTFChars(prompt, p);
 
         std::vector<llama_token> tokens = common_tokenize(g_ctx, fullPrompt, true, true);
+
+        // Guard 1: kung walang laman ang tokens (hal. defective tokenizer output o
+        // walang laman ang recognized text), i-abort bago pa dumaan sa decode - ang
+        // pagpasa ng 0-token batch papunta kay llama_decode ay puwedeng magdulot ng
+        // undefined behavior / crash.
+        if (tokens.empty()) {
+            jlog(env, "Walang nabuong token mula sa prompt, kinansela ang generate()");
+            return env->NewStringUTF("");
+        }
+
+        // Guard 2: kung mas malaki na ang prompt (system + tanong) kaysa sa context
+        // window (n_ctx=512), i-reject muna imbis na hayaang mag-overflow ang KV cache -
+        // maraming bersyon ng llama.cpp ang gumagamit ng GGML_ASSERT/abort() sa ganitong
+        // sitwasyon, na hindi kayang hulihin ng try/catch dahil hindi ito C++ exception.
+        const int maxNewTokens = 80;
+        if ((int)tokens.size() + maxNewTokens >= g_n_ctx) {
+            jlog(env, "Sobrang haba ng tanong (%d tokens) para sa context window, kinansela",
+                 (int)tokens.size());
+            return env->NewStringUTF("");
+        }
+
         llama_batch batch = llama_batch_get_one(tokens.data(), (int)tokens.size());
         if (llama_decode(g_ctx, batch) != 0) {
             jlog(env, "Initial decode failed");
@@ -92,7 +133,7 @@ Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring pr
 
         std::string result;
         int n_vocab = llama_vocab_n_tokens(g_vocab);
-        for (int i = 0; i < 80; i++) {
+        for (int i = 0; i < maxNewTokens; i++) {
             auto* logits = llama_get_logits_ith(g_ctx, batch.n_tokens - 1);
             if (!logits) { jlog(env, "Null logits at step %d", i); break; }
 
