@@ -112,6 +112,16 @@ Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring pr
             "<|start_header_id|>assistant<|end_header_id|>\n\n";
         env->ReleaseStringUTFChars(prompt, p);
 
+        // I-clear ang KV cache/memory bago mag-tokenize ng bagong tanong. Kung hindi
+        // ito ma-clear, nananatili ang mga token mula sa NAKARAANG generate() call sa
+        // context (dahil pareho lang na g_ctx ang ginagamit sa bawat tawag), kaya
+        // pinagsasama-sama ang dating system-prompt + tanong + sagot at yung bagong
+        // system-prompt + tanong sa iisang context. Yun ang dahilan kung bakit
+        // nagre-repeat/nagsu-summarize na lang si Llama ng NAKARAANG tanong imbis na
+        // sagutin ang bagong tanong - nalilito siya sa magkakapatong na mga turn.
+        llama_memory_t mem = llama_get_memory(g_ctx);
+        if (mem) llama_memory_clear(mem, true);
+
         std::vector<llama_token> tokens = common_tokenize(g_ctx, fullPrompt, true, true);
 
         // Guard 1: kung walang laman ang tokens (hal. defective tokenizer output o
