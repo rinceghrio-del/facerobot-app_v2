@@ -460,8 +460,10 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         )
 
+                val scrollView = ScrollView(this).apply { addView(container) }
+
         android.app.AlertDialog.Builder(this)
-            .setView(container)
+            .setView(scrollView)
             .setNegativeButton("Isara", null)
             .show()
     }
