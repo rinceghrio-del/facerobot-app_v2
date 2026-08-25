@@ -166,16 +166,18 @@ class MainActivity : ComponentActivity() {
         faceEmbedder = FaceEmbedder(this)
         faceStore = FaceStore(this)
         commandStore = CommandStore(this)
-                commandStore.seedDefaultsIfNeeded()
+        commandStore.seedDefaultsIfNeeded()
 
         // Llama offline fallback - i-download/i-load sa background
         Thread {
             if (!ModelDownloader.isModelDownloaded(this)) {
                 runOnUi { statusText.text = "⬇️ Dina-download ang Llama model..." }
+                LlamaBridge.appendLog("Simula ng Llama model download...")
                 ModelDownloader.downloadModel(
                     this,
                     onProgress = { pct -> runOnUi { statusText.text = "⬇️ Llama model... $pct%" } },
                     onDone = { success ->
+                        LlamaBridge.appendLog(if (success) "Model download tapos na" else "Model download FAILED")
                         if (success) {
                             val ok = LlamaBridge.loadModel(ModelDownloader.getModelFile(this).absolutePath)
                             runOnUi { statusText.text = if (ok) "🧠 Llama ready" else "❌ Llama load failed" }
@@ -184,6 +186,7 @@ class MainActivity : ComponentActivity() {
                 )
             } else {
                 val ok = LlamaBridge.loadModel(ModelDownloader.getModelFile(this).absolutePath)
+                LlamaBridge.appendLog(if (ok) "Model na-load (existing file)" else "Model load FAILED (existing file)")
                 if (!ok) runOnUi { statusText.text = "❌ Llama load failed" }
             }
         }.start()
@@ -375,6 +378,17 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { showVoiceLogDialog() }
         }
 
+        val llamaLogOption = Button(this).apply {
+            text = "🧠  Llama Log"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(40, 36, 40, 36)
+            background = makeRippleRoundedDrawable(darkChip, darkChipPressed, 24f)
+            setOnClickListener { showLlamaLogDialog() }
+        }
+
         val spacer = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
@@ -382,6 +396,9 @@ class MainActivity : ComponentActivity() {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
         val spacer3 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 24)
+        }
+        val spacer4 = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
 
@@ -402,6 +419,11 @@ class MainActivity : ComponentActivity() {
         container.addView(spacer3)
         container.addView(
             voiceLogOption,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+        container.addView(spacer4)
+        container.addView(
+            llamaLogOption,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         )
 
@@ -629,8 +651,8 @@ class MainActivity : ComponentActivity() {
         "Kumain na ba kayo",
         "tara laro tayo",
         "Huwag mo ako kalimutan na e charge!",
-        
-        
+
+
     )
 
     private fun greetIfNeeded(name: String) {
@@ -864,7 +886,7 @@ class MainActivity : ComponentActivity() {
                     speak(reply)
                     return "sino ako"
                 }
-                                text.contains("sino ka") -> {
+                text.contains("sino ka") -> {
                     speak("ako ay si rustech")
                     return "sino ka"
                 }
@@ -879,17 +901,22 @@ class MainActivity : ComponentActivity() {
     private fun handleLlamaFallback(heardText: String) {
         if (heardText.isBlank()) return
         sendCommandToEsp32("THINK")  // reaction habang nag-iisip si Llama
+        LlamaBridge.appendLog("Tanong: \"$heardText\"")
+        runOnUi { statusText.text = "🧠 Iniisip ni Llama ang sagot..." }
         Thread {
             val reply = try {
                 LlamaBridge.generate(heardText)
             } catch (e: Exception) {
+                LlamaBridge.appendLog("Exception sa Kotlin side: ${e.message}")
                 ""
             }
             runOnUi {
                 if (reply.isNotBlank()) {
+                    statusText.text = "💬 $reply"
                     speak(reply)
                     sendCommandToEsp32("TALK")
                 } else {
+                    statusText.text = "❌ Walang nabuong sagot si Llama"
                     speak("Pasensya na, hindi ko masagot yan ngayon.")
                     sendCommandToEsp32("STOP")
                 }
@@ -932,6 +959,46 @@ class MainActivity : ComponentActivity() {
             .setTitle("🗒️ Voice Log")
             .setView(scrollView)
             .setPositiveButton("I-clear") { _, _ -> voiceLog.clear() }
+            .setNegativeButton("Isara", null)
+            .show()
+    }
+
+    /**
+     * Ipinapakita ang mga log entries galing sa LlamaBridge (parehong Kotlin at native
+     * C++ side, via jlog()) - para makita ang loading status, errors, at exceptions ng
+     * Llama fallback nang walang kailangang external logcat app.
+     */
+    private fun showLlamaLogDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 24)
+        }
+
+        val entries = synchronized(LlamaBridge.logEntries) { LlamaBridge.logEntries.toList() }
+        if (entries.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = "Wala pang Llama log sa session na ito."
+                setPadding(0, 0, 0, 24)
+            })
+        } else {
+            val timeFormat = SimpleDateFormat("hh:mm:ss a", Locale.getDefault())
+            for ((timestamp, msg) in entries) {
+                container.addView(TextView(this).apply {
+                    text = "${timeFormat.format(Date(timestamp))} — $msg"
+                    textSize = 12f
+                    setPadding(0, 8, 0, 8)
+                })
+            }
+        }
+
+        val scrollView = ScrollView(this).apply { addView(container) }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("🧠 Llama Log")
+            .setView(scrollView)
+            .setPositiveButton("I-clear") { _, _ ->
+                synchronized(LlamaBridge.logEntries) { LlamaBridge.logEntries.clear() }
+            }
             .setNegativeButton("Isara", null)
             .show()
     }
