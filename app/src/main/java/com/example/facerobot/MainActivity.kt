@@ -95,6 +95,20 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putString("esp32_ip", ipOnly).apply()
         }
 
+    // Ang "personality"/system prompt ni Llama - dito nakabase kung sino siya at
+    // paano siya sumasagot. Naka-save sa SharedPreferences para pwede itong baguhin
+    // sa loob mismo ng app (menu -> "Persona ni Llama"), hindi na kailangang
+    // mag-rebuild kada gusto mong palitan ang pangalan o ugali niya.
+    private val defaultLlamaSystemPrompt =
+        "Ikaw ay si Rustech, ang AI assistant ng RUSTECH mini robot na ginawa ni Rusty. " +
+        "Palakaibigan at matulungin ka. Laging sagutin nang maikli lang (1-2 pangungusap) " +
+        "gamit ang Taglish."
+    private var llamaSystemPrompt: String
+        get() = prefs.getString("llama_system_prompt", defaultLlamaSystemPrompt)!!
+        set(value) {
+            prefs.edit().putString("llama_system_prompt", value).apply()
+        }
+
     private var lastSendTime = 0L
     private val sendIntervalMs = 300L
 
@@ -378,6 +392,17 @@ class MainActivity : ComponentActivity() {
             setOnClickListener { showVoiceLogDialog() }
         }
 
+        val llamaPersonaOption = Button(this).apply {
+            text = "🧠  Persona ni Llama"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(0xFFFFFFFF.toInt())
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(40, 36, 40, 36)
+            background = makeRippleRoundedDrawable(darkChip, darkChipPressed, 24f)
+            setOnClickListener { showLlamaPersonaDialog() }
+        }
+
         val llamaLogOption = Button(this).apply {
             text = "🧠  Llama Log"
             textSize = 14f
@@ -399,6 +424,9 @@ class MainActivity : ComponentActivity() {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
         val spacer4 = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, 24)
+        }
+        val spacer5 = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, 24)
         }
 
@@ -424,6 +452,11 @@ class MainActivity : ComponentActivity() {
         container.addView(spacer4)
         container.addView(
             llamaLogOption,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        )
+        container.addView(spacer5)
+        container.addView(
+            llamaPersonaOption,
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         )
 
@@ -922,7 +955,7 @@ class MainActivity : ComponentActivity() {
         runOnUi { statusText.text = "🧠 Iniisip ni Llama ang sagot..." }
         Thread {
             val reply = try {
-                LlamaBridge.generate(heardText)
+                LlamaBridge.generate(heardText, llamaSystemPrompt)
             } catch (e: Throwable) {
                 // Throwable (hindi lang Exception) para mahuli rin ang mga OutOfMemoryError
                 // mula sa JVM side kung sakaling doon mangyari ang memory pressure.
@@ -1144,6 +1177,45 @@ private fun computeCommand(box: Rect, frameWidth: Int): String {
                     esp32BaseUrl = newIp
                     statusText.text = "IP na-update: $newIp"
                 }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // Dito pwedeng baguhin ang "system prompt" ni Llama - kung sino siya (pangalan),
+    // ugali, at paano siya dapat sumagot. Nakikita ni Llama ito BAWAT tanong bilang
+    // pinaka-batayan ng sagot niya (parang "character sheet" niya). Naka-save sa
+    // SharedPreferences kaya hindi na kailangang mag-rebuild ng app kada palitan ito.
+    private fun showLlamaPersonaDialog() {
+        val input = EditText(this).apply {
+            hint = "hal. Ikaw ay si [pangalan], isang..."
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 5
+            maxLines = 10
+            gravity = Gravity.TOP or Gravity.START
+            setText(llamaSystemPrompt)
+        }
+        val scrollWrapper = ScrollView(this).apply {
+            setPadding(48, 24, 48, 0)
+            addView(input)
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("🧠 Persona ni Llama")
+            .setMessage("Ito ang \"system prompt\" na babasahin ni Llama bago sumagot - dito niya makikita ang pangalan niya at kung paano siya dapat kumilos.")
+            .setView(scrollWrapper)
+            .setPositiveButton("I-save") { _, _ ->
+                val newPrompt = input.text.toString().trim()
+                if (newPrompt.isNotEmpty()) {
+                    llamaSystemPrompt = newPrompt
+                    LlamaBridge.appendLog("Na-update ang persona/system prompt")
+                    statusText.text = "🧠 Na-update ang persona ni Llama"
+                }
+            }
+            .setNeutralButton("Ibalik sa Default") { _, _ ->
+                llamaSystemPrompt = defaultLlamaSystemPrompt
+                LlamaBridge.appendLog("Ibinalik sa default ang persona/system prompt")
+                statusText.text = "🧠 Ibinalik sa default ang persona ni Llama"
             }
             .setNegativeButton("Cancel", null)
             .show()
