@@ -898,19 +898,40 @@ class MainActivity : ComponentActivity() {
         return "llama fallback"
     }
 
+    // Pigil laban sa sabay-sabay na tawag sa LlamaBridge.generate(). Kapag hindi ito
+    // na-guard, at may sinabi ulit ang tao habang "nag-iisip" pa si Llama sa unang tanong
+    // (madalas mangyari dahil hindi tumitigil ang Vosk mic habang nagi-generate), dalawang
+    // Thread ang sabay-sabay na tatawag papunta sa parehong native llama_context nang
+    // walang lock -> race condition sa C++ side -> native crash (hindi na-catch ng Kotlin
+    // try/catch dahil crash ito sa ibang antas) -> namamatay ang buong app process ->
+    // bumabalik sa home screen. Ito ang pangunahing sanhi ng pag-crash.
+    @Volatile private var llamaBusy = false
+
     private fun handleLlamaFallback(heardText: String) {
         if (heardText.isBlank()) return
+        if (llamaBusy) {
+            LlamaBridge.appendLog("Busy pa si Llama sa nakaraang tanong, na-ignore muna: \"$heardText\"")
+            return
+        }
+        llamaBusy = true
+        // Itigil muna ang pakikinig ng Vosk habang nag-iisip si Llama, para hindi ito
+        // ma-double-trigger ng susunod na sasabihin ng tao bago pa matapos ang una.
+        speechService?.setPause(true)
         sendCommandToEsp32("THINK")  // reaction habang nag-iisip si Llama
         LlamaBridge.appendLog("Tanong: \"$heardText\"")
         runOnUi { statusText.text = "🧠 Iniisip ni Llama ang sagot..." }
         Thread {
             val reply = try {
                 LlamaBridge.generate(heardText)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable (hindi lang Exception) para mahuli rin ang mga OutOfMemoryError
+                // mula sa JVM side kung sakaling doon mangyari ang memory pressure.
                 LlamaBridge.appendLog("Exception sa Kotlin side: ${e.message}")
                 ""
             }
             runOnUi {
+                llamaBusy = false
+                if (!isSpeaking) speechService?.setPause(false)
                 if (reply.isNotBlank()) {
                     statusText.text = "💬 $reply"
                     speak(reply)
