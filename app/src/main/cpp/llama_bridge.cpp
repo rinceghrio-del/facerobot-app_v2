@@ -88,7 +88,7 @@ Java_com_example_facerobot_LlamaBridge_loadModel(JNIEnv* env, jobject, jstring m
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring prompt) {
+Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring prompt, jstring systemPrompt) {
     // try_lock (hindi blocking lock): kung may isa nang generate() na tumatakbo (dapat
     // hindi na mangyari dahil naka-guard na sa Kotlin side ang llamaBusy), huwag na
     // itong hintayin at magbalik na lang agad ng "" imbis na sabay-sabay silang
@@ -105,12 +105,18 @@ Java_com_example_facerobot_LlamaBridge_generate(JNIEnv* env, jobject, jstring pr
         }
 
         const char* p = env->GetStringUTFChars(prompt, nullptr);
+        const char* sysP = env->GetStringUTFChars(systemPrompt, nullptr);
+        // Kung walang ipinasang system prompt (blangko), gumamit na lang ng simpleng
+        // default para hindi basta mag-crash/mawalan ng context ang generate().
+        std::string sysText = (sysP != nullptr && sysP[0] != '\0')
+            ? std::string(sysP)
+            : "Ikaw ay isang helpful robot assistant. Sumagot nang maikli sa Taglish.";
         std::string fullPrompt =
-            "<|start_header_id|>system<|end_header_id|>\n\n"
-            "Ikaw ay si Rustech, isang helpful robot assistant. Sumagot nang maikli (1-2 pangungusap) sa Taglish.<|eot_id|>"
+            "<|start_header_id|>system<|end_header_id|>\n\n" + sysText + "<|eot_id|>"
             "<|start_header_id|>user<|end_header_id|>\n\n" + std::string(p) + "<|eot_id|>"
             "<|start_header_id|>assistant<|end_header_id|>\n\n";
         env->ReleaseStringUTFChars(prompt, p);
+        env->ReleaseStringUTFChars(systemPrompt, sysP);
 
         // I-clear ang KV cache/memory bago mag-tokenize ng bagong tanong. Kung hindi
         // ito ma-clear, nananatili ang mga token mula sa NAKARAANG generate() call sa
